@@ -5,7 +5,7 @@ When toConditionKey is called with valid type
 Then returns properly formatted runtime expression string
 */
 
-import { describe, expect, beforeEach, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HttpClient } from './client/http';
 import { MockSDK } from './mock-sdk';
 

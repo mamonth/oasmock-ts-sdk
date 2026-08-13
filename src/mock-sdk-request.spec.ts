@@ -5,7 +5,7 @@ When chainable condition methods are called
 Then conditions are accumulated and sent to server
 */
 
-import { describe, expect, beforeEach, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MockSDK } from './mock-sdk';
 import { MockSDKRequest } from './mock-sdk-request';
 
