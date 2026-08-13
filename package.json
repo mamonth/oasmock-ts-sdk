@@ -5,13 +5,13 @@
   "license": "MIT",
   "author": "Andrew Tereshko <andrew.tereshko@gmail.com>",
   "type": "module",
-  "main": "./dist/oasmock-sdk.cjs.js",
+  "main": "./dist/oasmock-sdk.cjs",
   "module": "./dist/oasmock-sdk.esm.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "import": "./dist/oasmock-sdk.esm.js",
-      "require": "./dist/oasmock-sdk.cjs.js",
+      "require": "./dist/oasmock-sdk.cjs",
       "types": "./dist/index.d.ts"
     }
   },

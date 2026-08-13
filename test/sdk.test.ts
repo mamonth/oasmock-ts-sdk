@@ -50,6 +50,26 @@ describe('SDK Integration', () => {
   });
 
   /*
+  Scenario: Mocking endpoint without explicit code
+  Given running OASMock server with test API
+  When SDK creates mock for /ping without specifying code
+  Then server accepts the example and returns 200 by default
+  */
+  it('should default code to 200 when omitted', async () => {
+    const exampleId = await sdk.onRequest('/ping', 'GET').respondWith({
+      body: { message: 'default status' },
+    });
+
+    expect(exampleId).toBeTruthy();
+
+    const response = await fetch(`${server.baseUrl}/ping`);
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data).toEqual({ message: 'default status' });
+  });
+
+  /*
   Scenario: Using one-time mock example
   Given running OASMock server
   When SDK creates one-time mock for /ping

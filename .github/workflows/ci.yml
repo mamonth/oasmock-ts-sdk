@@ -54,8 +54,8 @@ jobs:
     - name: Verify build output
       run: |
         ls -la dist/
-        node -e "import('./dist/oasmock-sdk.esm.js').then(m => console.log('ESM import ok'))"
-        node -e "require('./dist/oasmock-sdk.cjs.js'); console.log('CJS require ok')"
+        node -e "import('./dist/oasmock-sdk.esm.js').then(m => { if (typeof m.MockSDK !== 'function') throw new Error('ESM import missing MockSDK'); console.log('ESM import ok') })"
+        node -e "const m = require('./dist/oasmock-sdk.cjs'); if (typeof m.MockSDK !== 'function') throw new Error('CJS require missing MockSDK'); console.log('CJS require ok')"
 
     - name: Run integration tests
       run: npm run test:integration

@@ -7,7 +7,7 @@ export default defineConfig({
     lib: {
       entry: resolve(__dirname, 'src/index.ts'),
       name: 'OASMockSDK',
-      fileName: (format) => (format === 'es' ? 'oasmock-sdk.esm.js' : 'oasmock-sdk.cjs.js'),
+      fileName: (format) => (format === 'es' ? 'oasmock-sdk.esm.js' : 'oasmock-sdk.cjs'),
       formats: ['es', 'cjs'],
     },
     rollupOptions: {
