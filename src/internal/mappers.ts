@@ -3,6 +3,7 @@ import type {
   ExampleResponse,
   GetRequestsData,
 } from '../client/generated/types.gen';
+import { DEFAULT_RESPONSE_CODE } from '../constants';
 import type { IGetRequestHistoryOptions, IRequestConditions, IResponseData } from '../types';
 
 /**
@@ -10,7 +11,7 @@ import type { IGetRequestHistoryOptions, IRequestConditions, IResponseData } fro
  */
 export function mapResponseDataToExampleResponse(data: IResponseData): ExampleResponse {
   return {
-    code: data.code,
+    code: data.code ?? DEFAULT_RESPONSE_CODE,
     headers: data.headers as Record<string, string> | undefined,
     body: data.body,
   };

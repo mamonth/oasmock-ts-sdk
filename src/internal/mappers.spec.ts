@@ -52,16 +52,28 @@ describe('Mappers', () => {
 
     /*
     Scenario: Mapping response data with array body
-    Given response data with array body
+    Given response data with array body and no code
     When mapResponseDataToExampleResponse is called
-    Then returns ExampleResponse with array body
+    Then returns ExampleResponse with array body and default code 200
     */
     it('should handle array body', () => {
       const responseData = { body: [1, 2, 3] };
 
       const result = mapResponseDataToExampleResponse(responseData);
 
-      expect(result).toEqual({ body: [1, 2, 3] });
+      expect(result).toEqual({ code: 200, body: [1, 2, 3] });
+    });
+
+    /*
+    Scenario: Defaulting code to 200 when omitted
+    Given response data without a code
+    When mapResponseDataToExampleResponse is called
+    Then returns ExampleResponse with default code 200
+    */
+    it('should default code to 200 when omitted', () => {
+      const result = mapResponseDataToExampleResponse({ body: { message: 'pong' } });
+
+      expect(result).toEqual({ code: 200, body: { message: 'pong' } });
     });
   });
 

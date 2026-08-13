@@ -207,6 +207,27 @@ describe('MockSDK', () => {
     });
 
     /*
+    Scenario: Setting mock example without code defaults to 200
+    Given request conditions and response data without a code
+    When setExample is called
+    Then sends code 200 in the response payload to HTTP client
+    */
+    it('should send default code 200 when code omitted', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      vi.mocked(mockHttpClient.createExample).mockResolvedValue({
+        success: true,
+        message: 'OK',
+        id: 'example-123',
+      });
+
+      const conditions = { path: '/test' };
+      await sdk.setExample(conditions, { body: { ok: true } });
+
+      const calledWith = vi.mocked(mockHttpClient.createExample).mock.calls[0][0];
+      expect(calledWith.response.code).toBe(200);
+    });
+
+    /*
     Scenario: Setting mock example with TTL
     Given request conditions and response data with ttl
     When setExample is called

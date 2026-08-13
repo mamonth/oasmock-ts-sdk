@@ -4,6 +4,11 @@
 export const MOCK_PATH_SUFFIX = '/_mock';
 
 /**
+ * HTTP status code used for mock responses when IResponseData.code is omitted.
+ */
+export const DEFAULT_RESPONSE_CODE = 200;
+
+/**
  * Condition types supported in mock request conditions.
  */
 export const VALID_CONDITION_TYPES = [
