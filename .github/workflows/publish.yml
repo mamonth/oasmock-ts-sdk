@@ -6,6 +6,7 @@ on:
       - 'v*'
 
 permissions:
+  id-token: write  # Required for npm trusted publishing (OIDC)
   contents: read
 
 concurrency:
