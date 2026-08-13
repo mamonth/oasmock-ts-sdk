@@ -1,0 +1,65 @@
+{
+  "name": "oasmock-sdk",
+  "version": "0.0.5",
+  "description": "TypeScript/JavaScript SDK for programmatic interaction with the oasmock server via HTTP API",
+  "license": "MIT",
+  "author": "Andrew Tereshko <andrew.tereshko@gmail.com>",
+  "type": "module",
+  "main": "./dist/oasmock-sdk.cjs.js",
+  "module": "./dist/oasmock-sdk.esm.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/oasmock-sdk.esm.js",
+      "require": "./dist/oasmock-sdk.cjs.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "docs/api.md"
+  ],
+  "scripts": {
+    "generate": "openapi-ts",
+    "prepare": "npm run generate",
+    "build": "rm -rf dist && vite build",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.config.integration.ts",
+    "test:all": "npm test && npm run test:integration",
+    "ci": "npm run lint && npm run typecheck && npm test && npm run build && npm run test:integration",
+    "prepublishOnly": "npm run ci"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.8",
+    "@hey-api/openapi-ts": "^0.94.4",
+    "@types/node": "^25.5.0",
+    "@typescript/native": "npm:typescript@^7.0.2",
+    "@vitest/coverage-v8": "^4.1.0",
+    "oasmock": "^0.0.7",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vite": "^8.0.1",
+    "vite-plugin-dts": "^4.5.4",
+    "vitest": "^4.1.0"
+  },
+  "keywords": [
+    "openapi",
+    "mock",
+    "sdk",
+    "testing",
+    "typescript"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mamonth/oasmock-ts-sdk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mamonth/oasmock-ts-sdk/issues"
+  },
+  "homepage": "https://github.com/mamonth/oasmock-ts-sdk#readme"
+}

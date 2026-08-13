@@ -1,0 +1,80 @@
+name: Publish
+
+on:
+  release:
+    types: [ created ]
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js (from .nvmrc)
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Ensure OASMock binaries are executable
+        run: |
+          chmod +x node_modules/oasmock/bin/*
+          node_modules/oasmock/bin/oasmock --help || true
+
+      - name: Verify npm authentication
+        run: |
+          echo "Authenticated npm account: $(npm whoami)"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Check tag matches package version
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./package.json').version")
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG=${GITHUB_REF#refs/tags/}
+            if [[ "${TAG}" != "v${VERSION}" ]]; then
+              echo "ERROR: git tag '${TAG}' does not match package.json version 'v${VERSION}'."
+              echo "Bump the version in package.json and commit it before tagging the release."
+              exit 1
+            fi
+            echo "Tag '${TAG}' matches package.json version v${VERSION}"
+          fi
+
+      - name: Check if version is already published
+        id: check-published
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "oasmock-sdk@${VERSION}" version >/dev/null 2>&1; then
+            echo "oasmock-sdk@${VERSION} is already published on npm, skipping publish."
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "oasmock-sdk@${VERSION} is not yet published."
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # npm publish runs the "prepublishOnly" lifecycle script (npm run ci),
+      # so the full pipeline (lint + typecheck + tests + build + integration)
+      # executes exactly once, right before the package is packed and uploaded.
+      - name: Publish to npm
+        if: steps.check-published.outputs.published == 'false'
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

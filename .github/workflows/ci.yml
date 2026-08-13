@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test & Build (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [20.x, 22.x, 24.x]
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Ensure OASMock binaries are executable
+      run: |
+        chmod +x node_modules/oasmock/bin/*
+        node_modules/oasmock/bin/oasmock --help || true
+
+    - name: Run linting
+      run: npm run lint
+
+    - name: Run type checking
+      run: npm run typecheck
+
+    - name: Run unit tests
+      run: npm test
+
+    - name: Build package
+      run: npm run build
+
+    - name: Verify build output
+      run: |
+        ls -la dist/
+        node -e "import('./dist/oasmock-sdk.esm.js').then(m => console.log('ESM import ok'))"
+        node -e "require('./dist/oasmock-sdk.cjs.js'); console.log('CJS require ok')"
+
+    - name: Run integration tests
+      run: npm run test:integration
+      env:
+        CI: true
