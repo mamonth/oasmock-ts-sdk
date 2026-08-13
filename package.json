@@ -1,6 +1,6 @@
 {
   "name": "oasmock-sdk",
-  "version": "0.0.5",
+  "version": "{{version}}",
   "description": "TypeScript/JavaScript SDK for programmatic interaction with the oasmock server via HTTP API",
   "license": "MIT",
   "author": "Andrew Tereshko <andrew.tereshko@gmail.com>",

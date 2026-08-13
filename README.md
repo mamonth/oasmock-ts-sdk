@@ -63,6 +63,18 @@ npm run format
 npm run typecheck
 ```
 
+## Releasing
+
+Publishing is tag-driven: the git tag is the single source of truth for the npm version.
+
+1. Create and push a `vX.Y.Z` tag (e.g. `v0.0.7`):
+   ```bash
+   git tag v0.0.7 && git push origin v0.0.7
+   ```
+2. The publish workflow derives the version from the tag, validates it as semver, and publishes `oasmock-sdk@X.Y.Z` to npm.
+
+The version committed in `package.json` is not the publish authority — the tag always wins.
+
 ## License
 
 MIT
