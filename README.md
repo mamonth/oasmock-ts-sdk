@@ -36,9 +36,50 @@ const lastRequest = await mockSDK.getLastRequest({
 })
 ```
 
+### Async (AsyncAPI) management
+
+> **Experimental**: the async management API and the notification stream may change without a
+> backward-compatibility guarantee.
+
+```typescript
+import { MockSDK } from 'oasmock-sdk'
+
+const mockSDK = new MockSDK('http://localhost:19191')
+
+// Event-driven example: pushed when 'user.created' fires
+const exampleId = await mockSDK
+  .asyncChannel('/schema-prefix/user/updates')  // address includes the schema prefix
+  .onEvent('user.created')
+  .withDelay('250ms')
+  .push({ userId: '{$event.userId}' })
+
+// Fire the named event (global by default)
+await mockSDK.fireEvent('user.created', { payload: { userId: '42' } })
+
+// Instant broadcast to the channel's consumers
+await mockSDK.asyncChannel('/schema-prefix/user/updates').push({ kind: 'ping' })
+
+// Periodic delivery at a fixed cadence, cancelled via deleteExample
+const intervalId = await mockSDK
+  .asyncChannel('/schema-prefix/user/updates')
+  .onInterval('1s')
+  .push({ ping: 'pong' }, { ttl: '30s' })
+await mockSDK.deleteExample(intervalId)
+
+// Consumers: list, target, force-disconnect
+const consumers = await mockSDK.asyncConsumers.getList()
+await consumers[0].push({ direct: 'message' })
+await consumers[0].disconnect({ abrupt: true })
+
+// Management notification stream (lazy WebSocket)
+const off = mockSDK.on('push', ({ push }) => console.log(push.channel, push.payload))
+const offEvents = mockSDK.on('user.created', ({ event }) => console.log(event.name))
+off()  // unsubscribe; socket closes when the last handler is removed
+```
+
 ## API Reference
 
-See [docs/api.md](docs/api.md) for the full `MockSDK` / `MockSDKRequest` reference, type definitions, and error handling.
+See [docs/api.md](docs/api.md) for the full `MockSDK` / `MockSDKRequest` / async API reference, type definitions, and error handling.
 
 ## Development
 

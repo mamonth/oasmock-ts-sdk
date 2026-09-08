@@ -7,6 +7,7 @@ Then produce correct generated API request structures
 
 import { describe, expect, it, vi } from 'vitest';
 import {
+  mapAsyncExampleToRequest,
   mapConditionsToAddExampleRequest,
   mapHistoryOptionsToGetRequestsData,
   mapResponseDataToExampleResponse,
@@ -195,6 +196,90 @@ describe('Mappers', () => {
       const result = mapConditionsToAddExampleRequest(conditions, responseData);
 
       expect(result).not.toHaveProperty('ttl');
+    });
+  });
+
+  describe('mapAsyncExampleToRequest', () => {
+    /*
+    Scenario: Mapping an event-driven async example
+    Given channel, protocol, conditions, and payload
+    When mapAsyncExampleToRequest is called
+    Then returns the async branch with identity conditions and response payload
+    */
+    it('should map event-driven example', () => {
+      const result = mapAsyncExampleToRequest({
+        channel: '/schema/user/updates',
+        protocol: 'ws',
+        conditions: { '{$event.name}': 'user.created' },
+        payload: { kind: 'greeting' },
+      });
+
+      expect(result).toEqual({
+        channel: '/schema/user/updates',
+        protocol: 'ws',
+        conditions: { '{$event.name}': 'user.created' },
+        response: { code: 200, body: { kind: 'greeting' } },
+      });
+    });
+
+    /*
+    Scenario: Mapping an interval-driven async example
+    Given channel and interval
+    When mapAsyncExampleToRequest is called
+    Then returns the async branch with interval and default response
+    */
+    it('should map interval example', () => {
+      const result = mapAsyncExampleToRequest({
+        channel: '/schema/user/updates',
+        interval: 1000,
+        payload: { ping: 'pong' },
+      });
+
+      expect(result.interval).toBe(1000);
+      expect(result.channel).toBe('/schema/user/updates');
+      expect(result.conditions).toBeUndefined();
+      expect(result.response).toEqual({ code: 200, body: { ping: 'pong' } });
+    });
+
+    /*
+    Scenario: Omitting empty conditions and optional fields
+    Given parameters with no conditions and no extras
+    When mapAsyncExampleToRequest is called
+    Then omits conditions and optional fields
+    */
+    it('should omit empty conditions and optional fields', () => {
+      const result = mapAsyncExampleToRequest({ channel: '/schema/user/updates', payload: {} });
+
+      expect(result).toEqual({
+        channel: '/schema/user/updates',
+        response: { code: 200, body: {} },
+      });
+      expect(result.conditions).toBeUndefined();
+      expect(result).not.toHaveProperty('protocol');
+      expect(result).not.toHaveProperty('interval');
+      expect(result).not.toHaveProperty('delay');
+    });
+
+    /*
+    Scenario: Forwarding once, ttl, validate and delay
+    Given full lifetime options
+    When mapAsyncExampleToRequest is called
+    Then forwards them onto the async branch
+    */
+    it('should forward lifetime options', () => {
+      const result = mapAsyncExampleToRequest({
+        channel: '/schema/user/updates',
+        once: true,
+        ttl: 10,
+        validate: false,
+        delay: 150,
+        payload: {},
+      });
+
+      expect(result.once).toBe(true);
+      expect(result.ttl).toBe(10);
+      expect(result.validate).toBe(false);
+      expect(result.delay).toBe(150);
     });
   });
 

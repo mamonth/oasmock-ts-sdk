@@ -22,14 +22,24 @@ import { createHttpClient } from './client/http';
 describe('MockSDK', () => {
   const mockHttpClient: HttpClient = {
     createExample: vi.fn(),
+    deleteExample: vi.fn(),
     getRequests: vi.fn(),
+    fireEvent: vi.fn(),
+    postMessage: vi.fn(),
+    listConsumers: vi.fn(),
+    disconnectConsumer: vi.fn(),
   };
 
   beforeEach(() => {
     mockCreateHttpClient.mockClear();
     mockCreateHttpClient.mockReturnValue(mockHttpClient);
     vi.mocked(mockHttpClient.createExample).mockClear();
+    vi.mocked(mockHttpClient.deleteExample).mockClear();
     vi.mocked(mockHttpClient.getRequests).mockClear();
+    vi.mocked(mockHttpClient.fireEvent).mockClear();
+    vi.mocked(mockHttpClient.postMessage).mockClear();
+    vi.mocked(mockHttpClient.listConsumers).mockClear();
+    vi.mocked(mockHttpClient.disconnectConsumer).mockClear();
   });
 
   describe('toConditionKey', () => {
@@ -426,6 +436,364 @@ describe('MockSDK', () => {
       const result = await sdk.getLastRequest({ path: '/test' });
 
       expect(result).toBeUndefined();
+    });
+  });
+
+  describe('toConditionKey (async contexts)', () => {
+    /*
+    Scenario: Creating event identity condition key
+    Given condition type 'event' and value 'name'
+    When toConditionKey is called
+    Then returns runtime expression {$event.name}
+    */
+    it('should create event name condition key', () => {
+      expect(MockSDK.toConditionKey('event', 'name')).toBe('{$event.name}');
+    });
+
+    /*
+    Scenario: Creating event data condition key
+    Given condition type 'event' and value 'data'
+    When toConditionKey is called
+    Then returns runtime expression {$event.data}
+    */
+    it('should create event data condition key', () => {
+      expect(MockSDK.toConditionKey('event', 'data')).toBe('{$event.data}');
+    });
+
+    /*
+    Scenario: Creating connection recipient condition key
+    Given condition type 'connection' and value 'id'
+    When toConditionKey is called
+    Then returns runtime expression {$connection.id}
+    */
+    it('should create connection condition key', () => {
+      expect(MockSDK.toConditionKey('connection', 'id')).toBe('{$connection.id}');
+    });
+
+    /*
+    Scenario: Creating message reply condition key
+    Given condition type 'message' and value 'field'
+    When toConditionKey is called
+    Then returns runtime expression {$message.field}
+    */
+    it('should create message condition key', () => {
+      expect(MockSDK.toConditionKey('message', 'field')).toBe('{$message.field}');
+    });
+
+    /*
+    Scenario: Creating channel reply condition key
+    Given condition type 'channel' and value 'address'
+    When toConditionKey is called
+    Then returns runtime expression {$channel.address}
+    */
+    it('should create channel condition key', () => {
+      expect(MockSDK.toConditionKey('channel', 'address')).toBe('{$channel.address}');
+    });
+  });
+
+  describe('deleteExample', () => {
+    /*
+    Scenario: Deleting mock example successfully
+    Given an example ID
+    When deleteExample is called
+    Then sends DELETE to http client
+    */
+    it('should send delete request to http client', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      vi.mocked(mockHttpClient.deleteExample).mockResolvedValue({ success: true });
+
+      await sdk.deleteExample('example-1');
+
+      expect(mockHttpClient.deleteExample).toHaveBeenCalledWith('example-1');
+    });
+
+    /*
+    Scenario: Deleting mock example that fails
+    Given an example ID
+    When http client returns failure
+    Then deleteExample rejects with informative error
+    */
+    it('should throw when delete fails', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      vi.mocked(mockHttpClient.deleteExample).mockResolvedValue({ success: false });
+
+      await expect(sdk.deleteExample('example-1')).rejects.toThrow(
+        'Failed to delete example: example-1'
+      );
+    });
+
+    /*
+    Scenario: Deleting mock example without ID
+    Given an empty example ID
+    When deleteExample is called
+    Then throws without calling http client
+    */
+    it('should throw when exampleId is empty', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+
+      await expect(sdk.deleteExample('')).rejects.toThrow('Example ID is required');
+      expect(mockHttpClient.deleteExample).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('fireEvent', () => {
+    /*
+    Scenario: Firing global event by default
+    Given an event name with payload
+    When fireEvent is called without global
+    Then sends global true request to http client
+    */
+    it('should default global to true', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      vi.mocked(mockHttpClient.fireEvent).mockResolvedValue({ success: true });
+
+      await sdk.fireEvent('user.created', { payload: { userId: '42' } });
+
+      expect(mockHttpClient.fireEvent).toHaveBeenCalledWith({
+        name: 'user.created',
+        payload: { userId: '42' },
+        global: true,
+      });
+    });
+
+    /*
+    Scenario: Firing event with explicit options
+    Given an event name with payload, delay, and global
+    When fireEvent is called with explicit options
+    Then sends parsed delay milliseconds and explicit global
+    */
+    it('should honor explicit options and parse delay', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      vi.mocked(mockHttpClient.fireEvent).mockResolvedValue({ success: true });
+
+      await sdk.fireEvent('user.created', { payload: { n: 1 }, delay: '500ms', global: false });
+
+      expect(mockHttpClient.fireEvent).toHaveBeenCalledWith({
+        name: 'user.created',
+        payload: { n: 1 },
+        delay: 500,
+        global: false,
+      });
+    });
+
+    /*
+    Scenario: Firing event without a name
+    Given an empty event name
+    When fireEvent is called
+    Then throws without calling http client
+    */
+    it('should throw when name is empty', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+
+      await expect(sdk.fireEvent('')).rejects.toThrow('Event name is required');
+      expect(mockHttpClient.fireEvent).not.toHaveBeenCalled();
+    });
+
+    /*
+    Scenario: Firing event that fails
+    Given an event name
+    When http client returns failure
+    Then fireEvent rejects
+    */
+    it('should throw when fire fails', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      vi.mocked(mockHttpClient.fireEvent).mockResolvedValue({ success: false });
+
+      await expect(sdk.fireEvent('boom')).rejects.toThrow('Failed to fire event: Unknown error');
+    });
+  });
+
+  describe('pushToChannel', () => {
+    /*
+    Scenario: Pushing broadcast message
+    Given a channel and payload
+    When pushToChannel is called
+    Then sends channel and payload to http client
+    */
+    it('should push broadcast message', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      vi.mocked(mockHttpClient.postMessage).mockResolvedValue({ success: true });
+
+      await sdk.pushToChannel('/schema/user/updates', { payload: { kind: 'ping' } });
+
+      expect(mockHttpClient.postMessage).toHaveBeenCalledWith({
+        channel: '/schema/user/updates',
+        payload: { kind: 'ping' },
+      });
+    });
+
+    /*
+    Scenario: Pushing targeted message
+    Given a channel, connection id, and payload
+    When pushToChannel is called
+    Then sends connectionId to http client
+    */
+    it('should push targeted message', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      vi.mocked(mockHttpClient.postMessage).mockResolvedValue({ success: true });
+
+      await sdk.pushToChannel('/schema/user/updates', {
+        connectionId: 'conn-1',
+        payload: { kind: 'dm' },
+      });
+
+      expect(mockHttpClient.postMessage).toHaveBeenCalledWith({
+        channel: '/schema/user/updates',
+        connectionId: 'conn-1',
+        payload: { kind: 'dm' },
+      });
+    });
+
+    /*
+    Scenario: Pushing without a channel
+    Given an empty channel
+    When pushToChannel is called
+    Then throws without calling http client
+    */
+    it('should throw when channel is empty', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+
+      await expect(sdk.pushToChannel('', { payload: {} })).rejects.toThrow('Channel is required');
+      expect(mockHttpClient.postMessage).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getConsumerList', () => {
+    /*
+    Scenario: Listing consumers with channel filter
+    Given a channel
+    When getConsumerList is called
+    Then maps consumers into SDK wrappers
+    */
+    it('should map consumers into wrappers', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      vi.mocked(mockHttpClient.listConsumers).mockResolvedValue({
+        consumers: [
+          { connectionId: 'conn-1', channel: '/schema/user/updates', protocol: 'ws', streams: [] },
+        ],
+      });
+
+      const consumers = await sdk.getConsumerList('/schema/user/updates');
+
+      expect(mockHttpClient.listConsumers).toHaveBeenCalledWith('/schema/user/updates');
+      expect(consumers).toHaveLength(1);
+      expect(consumers[0]).toMatchObject({
+        connectionId: 'conn-1',
+        channel: '/schema/user/updates',
+        protocol: 'ws',
+      });
+      expect(typeof consumers[0].disconnect).toBe('function');
+      expect(typeof consumers[0].push).toBe('function');
+    });
+
+    /*
+    Scenario: Listing all consumers without filter
+    Given no channel
+    When asyncConsumers.getList is called
+    Then calls http client without channel
+    */
+    it('should list all consumers via asyncConsumers facade', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      vi.mocked(mockHttpClient.listConsumers).mockResolvedValue({ consumers: [] });
+
+      await sdk.asyncConsumers.getList();
+
+      expect(mockHttpClient.listConsumers).toHaveBeenCalledWith(undefined);
+    });
+
+    /*
+    Scenario: Listing consumers with no response
+    Given http client returns undefined
+    When getConsumerList is called
+    Then returns empty array
+    */
+    it('should return empty list when response is undefined', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      vi.mocked(mockHttpClient.listConsumers).mockResolvedValue(undefined);
+
+      const result = await sdk.getConsumerList();
+
+      expect(result).toEqual([]);
+    });
+  });
+
+  describe('disconnectConsumer', () => {
+    /*
+    Scenario: Disconnecting consumer with abrupt flag
+    Given a connection id and abrupt option
+    When disconnectConsumer is called
+    Then sends query with abrupt true
+    */
+    it('should send close control query params', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      vi.mocked(mockHttpClient.disconnectConsumer).mockResolvedValue({ success: true });
+
+      await sdk.disconnectConsumer('conn-9', { abrupt: true });
+
+      expect(mockHttpClient.disconnectConsumer).toHaveBeenCalledWith('conn-9', { abrupt: true });
+    });
+
+    /*
+    Scenario: Disconnecting consumer without options
+    Given a connection id only
+    When disconnectConsumer is called
+    Then omits the query parameter
+    */
+    it('should omit query when no options provided', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      vi.mocked(mockHttpClient.disconnectConsumer).mockResolvedValue({ success: true });
+
+      await sdk.disconnectConsumer('conn-9');
+
+      expect(mockHttpClient.disconnectConsumer).toHaveBeenCalledWith('conn-9', undefined);
+    });
+
+    /*
+    Scenario: Disconnecting consumer without a connection id
+    Given an empty connection id
+    When disconnectConsumer is called
+    Then throws
+    */
+    it('should throw when connectionId is empty', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+
+      await expect(sdk.disconnectConsumer('')).rejects.toThrow('Connection ID is required');
+    });
+  });
+
+  describe('asyncChannel', () => {
+    /*
+    Scenario: Creating async channel facade
+    Given an address
+    When asyncChannel is called
+    Then returns a channel bound to that address with default ws protocol
+    */
+    it('should create channel with default protocol', () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      const channel = sdk.asyncChannel('/schema-prefix/user/updates');
+
+      expect(channel).toMatchObject({ channel: '/schema-prefix/user/updates', protocol: 'ws' });
+      expect(typeof channel.onEvent).toBe('function');
+      expect(typeof channel.onInterval).toBe('function');
+      expect(typeof channel.push).toBe('function');
+    });
+
+    /*
+    Scenario: Publishing instantly via channel
+    Given a channel
+    When channel.push is called
+    Then pushes broadcast message via http client
+    */
+    it('should push via channel facade', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      vi.mocked(mockHttpClient.postMessage).mockResolvedValue({ success: true });
+
+      await sdk.asyncChannel('/schema-prefix/user/updates').push({ now: true });
+
+      expect(mockHttpClient.postMessage).toHaveBeenCalledWith({
+        channel: '/schema-prefix/user/updates',
+        payload: { now: true },
+      });
     });
   });
 });
