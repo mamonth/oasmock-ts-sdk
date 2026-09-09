@@ -159,8 +159,9 @@ export type TDuration = number | string;
 
 /**
  * AsyncAPI transport protocol used when targeting a channel.
+ * 'signalr' targets a channel served by a SignalR hub.
  */
-export type TAsyncProtocol = 'ws' | 'http';
+export type TAsyncProtocol = 'ws' | 'http' | 'signalr';
 
 /**
  * Conditions for an async example. Keys are full runtime-expression keys
@@ -266,6 +267,12 @@ export interface IConsumer {
   channel: string;
   protocol: 'ws' | 'signalr';
   streams?: Array<{ connectionId?: string; invocationId?: string; streamId?: string }>;
+  /**
+   * Concrete SignalR hub upgrade path (including per-account path-parameter
+   * values such as an accountId segment). Present on signalr consumers,
+   * absent on raw ws consumers.
+   */
+  path?: string;
   disconnect(options?: IDisconnectOptions): Promise<void>;
   push(payload: unknown): Promise<void>;
 }

@@ -53,7 +53,7 @@ export function mapConditionsToAddExampleRequest(
  */
 export interface IAsyncExampleRequestParams {
   channel: string;
-  protocol?: 'ws' | 'http';
+  protocol?: 'ws' | 'http' | 'signalr';
   conditions?: TAsyncConditions;
   interval?: number;
   delay?: number;

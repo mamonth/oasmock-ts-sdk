@@ -71,6 +71,12 @@ const consumers = await mockSDK.asyncConsumers.getList()
 await consumers[0].push({ direct: 'message' })
 await consumers[0].disconnect({ abrupt: true })
 
+// Per-account targeting on a shared SignalR hub: each consumer carries its
+// concrete upgrade path (including captured path-params like accountId)
+const qaA = (await mockSDK.getConsumerList('/qoden/OpenOrders'))
+  .find((c) => c.protocol === 'signalr' && c.path === '/qoden/ws/account/qa-A')
+await qaA?.push([{ orderId: 'grid-1' }])  // arrays/scalars delivered verbatim
+
 // Management notification stream (lazy WebSocket)
 const off = mockSDK.on('push', ({ push }) => console.log(push.channel, push.payload))
 const offEvents = mockSDK.on('user.created', ({ event }) => console.log(event.name))

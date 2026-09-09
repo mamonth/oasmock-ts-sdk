@@ -645,6 +645,25 @@ describe('MockSDK', () => {
     });
 
     /*
+    Scenario: Pushing an array payload
+    Given a channel and an array payload
+    When pushToChannel is called
+    Then sends the array payload verbatim to http client
+    */
+    it('should push array payload verbatim', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      vi.mocked(mockHttpClient.postMessage).mockResolvedValue({ success: true });
+      const payload = [{ orderId: 'grid-1' }];
+
+      await sdk.pushToChannel('/qoden/OpenOrders', { payload });
+
+      expect(mockHttpClient.postMessage).toHaveBeenCalledWith({
+        channel: '/qoden/OpenOrders',
+        payload: [{ orderId: 'grid-1' }],
+      });
+    });
+
+    /*
     Scenario: Pushing without a channel
     Given an empty channel
     When pushToChannel is called
@@ -684,6 +703,37 @@ describe('MockSDK', () => {
       });
       expect(typeof consumers[0].disconnect).toBe('function');
       expect(typeof consumers[0].push).toBe('function');
+    });
+
+    /*
+    Scenario: Mapping the SignalR upgrade path onto consumers
+    Given a signalr consumer with a per-account upgrade path
+    When getConsumerList is called
+    Then the consumer wrapper exposes the path
+    */
+    it('should map signalr upgrade path onto consumer', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      vi.mocked(mockHttpClient.listConsumers).mockResolvedValue({
+        consumers: [
+          {
+            connectionId: 'conn-1',
+            channel: '/qoden/OpenOrders',
+            protocol: 'signalr',
+            path: '/qoden/ws/account/qa-A',
+            streams: [],
+          },
+        ],
+      });
+
+      const consumers = await sdk.getConsumerList('/qoden/OpenOrders');
+
+      expect(consumers[0]).toMatchObject({
+        connectionId: 'conn-1',
+        channel: '/qoden/OpenOrders',
+        protocol: 'signalr',
+        path: '/qoden/ws/account/qa-A',
+      });
+      expect(consumers[0].path).toBe('/qoden/ws/account/qa-A');
     });
 
     /*
@@ -776,6 +826,19 @@ describe('MockSDK', () => {
       expect(typeof channel.onEvent).toBe('function');
       expect(typeof channel.onInterval).toBe('function');
       expect(typeof channel.push).toBe('function');
+    });
+
+    /*
+    Scenario: Creating an async channel facade bound to a SignalR hub
+    Given an address and the signalr protocol
+    When asyncChannel is called
+    Then returns a channel bound to that address with the signalr protocol
+    */
+    it('should create channel with signalr protocol', () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      const channel = sdk.asyncChannel('/qoden/OpenOrders', 'signalr');
+
+      expect(channel).toMatchObject({ channel: '/qoden/OpenOrders', protocol: 'signalr' });
     });
 
     /*
