@@ -242,6 +242,27 @@ describe('Mappers', () => {
     });
 
     /*
+    Scenario: Mapping an async example targeting a SignalR hub channel
+    Given channel, signalr protocol, and payload
+    When mapAsyncExampleToRequest is called
+    Then returns the async branch with the signalr protocol and array payload passed through
+    */
+    it('should map signalr hub channel example', () => {
+      const payload: Array<{ orderId: string }> = [{ orderId: 'grid-1' }];
+      const result = mapAsyncExampleToRequest({
+        channel: '/qoden/OpenOrders',
+        protocol: 'signalr',
+        payload,
+      });
+
+      expect(result).toEqual({
+        channel: '/qoden/OpenOrders',
+        protocol: 'signalr',
+        response: { code: 200, body: payload },
+      });
+    });
+
+    /*
     Scenario: Omitting empty conditions and optional fields
     Given parameters with no conditions and no extras
     When mapAsyncExampleToRequest is called

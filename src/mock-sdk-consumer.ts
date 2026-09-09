@@ -14,18 +14,21 @@ export class MockSDKConsumer {
   readonly channel: string;
   readonly protocol: ConsumerProtocol;
   readonly streams?: ConsumerStream[];
+  readonly path?: string;
 
   constructor(
     private readonly sdk: MockSDK,
     connectionId: string,
     channel: string,
     protocol: ConsumerProtocol = 'ws',
-    streams?: ConsumerStream[]
+    streams?: ConsumerStream[],
+    path?: string
   ) {
     this.connectionId = connectionId;
     this.channel = channel;
     this.protocol = protocol;
     this.streams = streams;
+    this.path = path;
   }
 
   /**

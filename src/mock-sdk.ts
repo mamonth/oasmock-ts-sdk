@@ -196,7 +196,8 @@ export class MockSDK {
           item.connectionId ?? '',
           item.channel ?? '',
           item.protocol ?? 'ws',
-          item.streams
+          item.streams,
+          item.path
         )
     );
   }

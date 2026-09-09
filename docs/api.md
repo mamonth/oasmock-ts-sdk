@@ -30,7 +30,7 @@ Returns a `MockSDKRequest` builder for the given path and HTTP method (default `
 
 ##### `asyncChannel(address: string, protocol?: TAsyncProtocol): IAsyncChannel`
 
-Binds to an AsyncAPI channel. The address must include the schema prefix as mounted on the server (e.g. `/schema-prefix/user/updates`). `protocol` defaults to `'ws'` (`'http'` supported). Returns a channel facade with `onEvent`, `onInterval`, `push`, `fireEvent`, and `getConsumerList`.
+Binds to an AsyncAPI channel. The address must include the schema prefix as mounted on the server (e.g. `/schema-prefix/user/updates`). `protocol` defaults to `'ws'` (`'http'` and `'signalr'` supported — `'signalr'` targets a channel served by a SignalR hub). Returns a channel facade with `onEvent`, `onInterval`, `push`, `fireEvent`, and `getConsumerList`.
 
 ##### `asyncConsumers`
 
@@ -68,10 +68,12 @@ Directly pushes a message to a channel's consumers (targeted via `connectionId` 
 ```typescript
 interface IPushMessageOptions {
   connectionId?: string;
-  payload?: unknown;
+  payload?: unknown;   // any JSON value (object, array, or scalar), delivered verbatim
   delay?: TDuration;
 }
 ```
+
+The payload may be any JSON value — object, array, or scalar — delivered verbatim as the channel message / SignalR stream `item`. Object payloads are templated with `{$state.*}`/`{$env.*}`; arrays and scalars pass through untouched.
 
 ##### `getConsumerList(channel?: string): Promise<IConsumer[]>`
 
@@ -157,12 +159,13 @@ interface IConsumer {
   channel: string;
   protocol: 'ws' | 'signalr';
   streams?: Array<{ connectionId?: string; invocationId?: string; streamId?: string }>;
+  path?: string;   // concrete SignalR hub upgrade path (incl. per-account path params)
   disconnect(options?: IDisconnectOptions): Promise<void>;
   push(payload: unknown): Promise<void>;
 }
 ```
 
-`getList()`/`getConsumerList()` return a point‑in‑time snapshot; `disconnect()`/`push()` issue fresh server calls each time.
+`getList()`/`getConsumerList()` return a point‑in‑time snapshot; `disconnect()`/`push()` issue fresh server calls each time. The optional `path` field is present on SignalR consumers and carries the concrete hub upgrade path (including captured path‑parameter values such as a per‑account `accountId` segment), enabling a targeted push to select one logical account's connections on a shared hub channel.
 
 ### Management stream envelopes
 
@@ -212,7 +215,7 @@ Adds a one‑time example (removed after first match). Returns the example ID.
 ```typescript
 type TMethod = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE' | 'HEAD' | 'OPTIONS';
 
-type TAsyncProtocol = 'ws' | 'http';
+type TAsyncProtocol = 'ws' | 'http' | 'signalr';
 
 /** ms-based for delay/interval; seconds-based for ttl — number = server-native unit */
 type TDuration = number | string;
