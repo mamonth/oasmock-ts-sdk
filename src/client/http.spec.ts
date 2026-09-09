@@ -9,18 +9,36 @@ Then returns URL with /_mock suffix and no duplicate slashes
 import { describe, expect, it, vi } from 'vitest';
 import { createHttpClient, normalizeBaseUrl } from './http';
 
-const { mockCreateExample, mockGetRequests, mockCreateClient, mockCreateConfig } = vi.hoisted(
-  () => ({
-    mockCreateExample: vi.fn(),
-    mockGetRequests: vi.fn(),
-    mockCreateClient: vi.fn(),
-    mockCreateConfig: vi.fn(),
-  })
-);
+const {
+  mockCreateExample,
+  mockDeleteExample,
+  mockGetRequests,
+  mockFireEvent,
+  mockPostMessage,
+  mockListConsumers,
+  mockDisconnectConsumer,
+  mockCreateClient,
+  mockCreateConfig,
+} = vi.hoisted(() => ({
+  mockCreateExample: vi.fn(),
+  mockDeleteExample: vi.fn(),
+  mockGetRequests: vi.fn(),
+  mockFireEvent: vi.fn(),
+  mockPostMessage: vi.fn(),
+  mockListConsumers: vi.fn(),
+  mockDisconnectConsumer: vi.fn(),
+  mockCreateClient: vi.fn(),
+  mockCreateConfig: vi.fn(),
+}));
 
 vi.mock('./generated', () => ({
   createExample: mockCreateExample,
+  deleteExample: mockDeleteExample,
   getRequests: mockGetRequests,
+  fireEvent: mockFireEvent,
+  postMessage: mockPostMessage,
+  listConsumers: mockListConsumers,
+  disconnectConsumer: mockDisconnectConsumer,
 }));
 
 vi.mock('./generated/client', () => ({
@@ -151,6 +169,138 @@ describe('HTTP Client', () => {
         query: params,
       });
       expect(result).toEqual(mockResponse.data);
+    });
+
+    /*
+    Scenario: HTTP client deleteExample method
+    Given HTTP client and an example id
+    When deleteExample is called
+    Then calls generated deleteExample with client and path
+    */
+    it('should delete an example', async () => {
+      const mockResponse = { data: { success: true } };
+      mockDeleteExample.mockResolvedValue(mockResponse);
+      const client = createHttpClient('http://localhost:19191');
+
+      const result = await client.deleteExample('example-1');
+
+      expect(mockDeleteExample).toHaveBeenCalledWith({
+        client: mockClientInstance,
+        path: { exampleId: 'example-1' },
+      });
+      expect(result).toEqual(mockResponse.data);
+    });
+
+    /*
+    Scenario: HTTP client fireEvent method
+    Given HTTP client and an event body
+    When fireEvent is called
+    Then calls generated fireEvent with client and body
+    */
+    it('should fire an event', async () => {
+      const mockResponse = { data: { success: true } };
+      mockFireEvent.mockResolvedValue(mockResponse);
+      const client = createHttpClient('http://localhost:19191');
+
+      const body = { name: 'user.created', global: true };
+      const result = await client.fireEvent(body);
+
+      expect(mockFireEvent).toHaveBeenCalledWith({ client: mockClientInstance, body });
+      expect(result).toEqual(mockResponse.data);
+    });
+
+    /*
+    Scenario: HTTP client postMessage method
+    Given HTTP client and a message body
+    When postMessage is called
+    Then calls generated postMessage with client and body
+    */
+    it('should post a message to a channel', async () => {
+      const mockResponse = { data: { success: true } };
+      mockPostMessage.mockResolvedValue(mockResponse);
+      const client = createHttpClient('http://localhost:19191');
+
+      const body = { channel: '/schema/user/updates', payload: { kind: 'ping' } };
+      const result = await client.postMessage(body);
+
+      expect(mockPostMessage).toHaveBeenCalledWith({ client: mockClientInstance, body });
+      expect(result).toEqual(mockResponse.data);
+    });
+
+    /*
+    Scenario: HTTP client listConsumers method with channel
+    Given HTTP client and a channel
+    When listConsumers is called
+    Then calls generated listConsumers with client and query
+    */
+    it('should list consumers for a channel', async () => {
+      const mockResponse = { data: { consumers: [] } };
+      mockListConsumers.mockResolvedValue(mockResponse);
+      const client = createHttpClient('http://localhost:19191');
+
+      const result = await client.listConsumers('/schema/user/updates');
+
+      expect(mockListConsumers).toHaveBeenCalledWith({
+        client: mockClientInstance,
+        query: { channel: '/schema/user/updates' },
+      });
+      expect(result).toEqual(mockResponse.data);
+    });
+
+    /*
+    Scenario: HTTP client listConsumers method without channel
+    Given HTTP client
+    When listConsumers is called without a channel
+    Then calls generated listConsumers with client only
+    */
+    it('should list consumers across all channels', async () => {
+      const mockResponse = { data: { consumers: [] } };
+      mockListConsumers.mockResolvedValue(mockResponse);
+      const client = createHttpClient('http://localhost:19191');
+
+      await client.listConsumers();
+
+      expect(mockListConsumers).toHaveBeenCalledWith({ client: mockClientInstance });
+    });
+
+    /*
+    Scenario: HTTP client disconnectConsumer method
+    Given HTTP client, connection id, and close query
+    When disconnectConsumer is called
+    Then calls generated disconnectConsumer with client, path, and query
+    */
+    it('should disconnect a consumer with query', async () => {
+      const mockResponse = { data: { success: true } };
+      mockDisconnectConsumer.mockResolvedValue(mockResponse);
+      const client = createHttpClient('http://localhost:19191');
+
+      const result = await client.disconnectConsumer('conn-1', { abrupt: true });
+
+      expect(mockDisconnectConsumer).toHaveBeenCalledWith({
+        client: mockClientInstance,
+        path: { connectionId: 'conn-1' },
+        query: { abrupt: true },
+      });
+      expect(result).toEqual(mockResponse.data);
+    });
+
+    /*
+    Scenario: HTTP client disconnectConsumer method without query
+    Given HTTP client and connection id
+    When disconnectConsumer is called without query
+    Then calls generated disconnectConsumer without a query
+    */
+    it('should disconnect a consumer without query', async () => {
+      const mockResponse = { data: { success: true } };
+      mockDisconnectConsumer.mockResolvedValue(mockResponse);
+      const client = createHttpClient('http://localhost:19191');
+
+      await client.disconnectConsumer('conn-1');
+
+      expect(mockDisconnectConsumer).toHaveBeenCalledWith({
+        client: mockClientInstance,
+        path: { connectionId: 'conn-1' },
+      });
     });
   });
 });

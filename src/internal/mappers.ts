@@ -2,9 +2,15 @@ import type {
   AddExampleRequest,
   ExampleResponse,
   GetRequestsData,
+  NewExampleRequestAsync,
 } from '../client/generated/types.gen';
 import { DEFAULT_RESPONSE_CODE } from '../constants';
-import type { IGetRequestHistoryOptions, IRequestConditions, IResponseData } from '../types';
+import type {
+  IGetRequestHistoryOptions,
+  IRequestConditions,
+  IResponseData,
+  TAsyncConditions,
+} from '../types';
 
 /**
  * Maps SDK response data into the wire-format example response object.
@@ -40,6 +46,47 @@ export function mapConditionsToAddExampleRequest(
     response: mapResponseDataToExampleResponse(responseData),
   };
   return request;
+}
+
+/**
+ * Parameters for the async (AsyncAPI) branch of AddExampleRequest.
+ */
+export interface IAsyncExampleRequestParams {
+  channel: string;
+  protocol?: 'ws' | 'http';
+  conditions?: TAsyncConditions;
+  interval?: number;
+  delay?: number;
+  once?: boolean;
+  ttl?: number;
+  validate?: boolean;
+  payload: unknown;
+}
+
+/**
+ * Maps async example parameters into the AsyncAPI branch of AddExampleRequest.
+ */
+export function mapAsyncExampleToRequest(
+  params: IAsyncExampleRequestParams
+): NewExampleRequestAsync {
+  const { channel, protocol, conditions, interval, delay, once, ttl, validate, payload } = params;
+  return {
+    channel,
+    ...(protocol !== undefined ? { protocol } : {}),
+    conditions:
+      conditions && Object.keys(conditions).length > 0
+        ? (conditions as NewExampleRequestAsync['conditions'])
+        : undefined,
+    ...(interval !== undefined ? { interval } : {}),
+    ...(delay !== undefined ? { delay } : {}),
+    ...(once !== undefined ? { once } : {}),
+    ...(ttl !== undefined ? { ttl } : {}),
+    ...(validate !== undefined ? { validate } : {}),
+    response: {
+      code: DEFAULT_RESPONSE_CODE,
+      body: payload as ExampleResponse['body'],
+    },
+  };
 }
 
 /**

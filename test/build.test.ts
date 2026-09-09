@@ -19,7 +19,16 @@ const distDir = join(repoRoot, 'dist');
 const ESM_ARTIFACT = join(distDir, 'oasmock-sdk.esm.js');
 const CJS_ARTIFACT = join(distDir, 'oasmock-sdk.cjs');
 
-const PUBLIC_EXPORTS = ['MockSDK', 'MockSDKRequest'];
+const PUBLIC_EXPORTS = [
+  'ManagementStream',
+  'MockSDK',
+  'MockSDKAsyncChannel',
+  'MockSDKAsyncEventExample',
+  'MockSDKAsyncExample',
+  'MockSDKConsumer',
+  'MockSDKRequest',
+  'SDKEvent',
+];
 
 interface LoadResult {
   keys: string[];

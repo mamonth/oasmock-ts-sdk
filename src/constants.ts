@@ -19,9 +19,26 @@ export const VALID_CONDITION_TYPES = [
   'body',
   'state',
   'env',
+  'event',
+  'connection',
+  'message',
+  'channel',
 ] as const;
 
 export type ConditionType = (typeof VALID_CONDITION_TYPES)[number];
+
+/**
+ * Condition types whose runtime-expression key has no request sub-context
+ * (e.g. {$event.name} instead of {$request.event.name}).
+ */
+export const PREFIXED_CONDITION_TYPES = [
+  'event',
+  'connection',
+  'message',
+  'channel',
+  'state',
+  'env',
+] as const;
 
 /**
  * Prefixes used to build runtime-expression condition keys.
@@ -30,7 +47,16 @@ export const CONDITION_KEY_PREFIXES = {
   REQUEST: '{$request.',
   STATE: '{$state.',
   ENV: '{$env.',
+  EVENT: '{$event.',
+  CONNECTION: '{$connection.',
+  MESSAGE: '{$message.',
+  CHANNEL: '{$channel.',
 } as const;
+
+/**
+ * Default AsyncAPI protocol used when targeting a channel.
+ */
+export const DEFAULT_ASYNC_PROTOCOL = 'ws' as const;
 
 /**
  * Default timeouts used by integration test tooling (milliseconds).
@@ -52,7 +78,9 @@ export const TEST_CONSTANTS = {
   OASMOCK_CLI_FLAGS: {
     FROM: '--from',
     PORT: '--port',
+    PREFIX: '--prefix',
     VERBOSE: '--verbose',
   } as const,
   API_SPEC_PATH: './test/_shared/resources/test-api.yaml',
+  ASYNC_API_SPEC_PATH: './test/_shared/resources/test-async.yaml',
 } as const;

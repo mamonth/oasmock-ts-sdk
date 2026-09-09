@@ -41,9 +41,10 @@ async function getBinaryPath(): Promise<string> {
 }
 
 export async function startOASMockServer(
-  port = TEST_CONSTANTS.DEFAULT_OASMOCK_PORT,
-  apiSpec = join(__dirname, 'resources/test-api.yaml')
+  options: { port?: number; apiSpec?: string; prefix?: string } = {}
 ): Promise<OASMockServer> {
+  const port = options.port ?? TEST_CONSTANTS.DEFAULT_OASMOCK_PORT;
+  const apiSpec = options.apiSpec ?? join(__dirname, 'resources/test-api.yaml');
   const binaryPath = await getBinaryPath();
 
   if (process.env.CI) {
@@ -54,6 +55,9 @@ export async function startOASMockServer(
     TEST_CONSTANTS.OASMOCK_CLI_SUBCOMMAND,
     TEST_CONSTANTS.OASMOCK_CLI_FLAGS.FROM,
     apiSpec,
+    ...(options.prefix !== undefined
+      ? [TEST_CONSTANTS.OASMOCK_CLI_FLAGS.PREFIX, options.prefix]
+      : []),
     TEST_CONSTANTS.OASMOCK_CLI_FLAGS.PORT,
     port.toString(),
     TEST_CONSTANTS.OASMOCK_CLI_FLAGS.VERBOSE,
