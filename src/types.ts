@@ -56,6 +56,71 @@ export interface IRequestConditions {
 }
 
 /**
+ * Client-based ledger of example IDs created through an SDK instance or scope.
+ * Mutations are local only and never issue network requests.
+ */
+export interface IExampleIds extends Iterable<string> {
+  /**
+   * Number of tracked IDs.
+   */
+  readonly size: number;
+
+  /**
+   * Whether the given ID is currently tracked.
+   */
+  has(id: string): boolean;
+
+  /**
+   * Adds an ID to the local ledger without contacting the server.
+   */
+  add(id: string): this;
+
+  /**
+   * Removes an ID from the local ledger without contacting the server.
+   * Returns true when the ID was tracked.
+   */
+  remove(id: string): boolean;
+
+  /**
+   * Forgets every tracked ID without contacting the server. Unlike
+   * `MockSDK.clearExamples()`, this does not delete anything server-side.
+   */
+  reset(): void;
+}
+
+/**
+ * Successful outcome of `MockSDK.clearExamples()`.
+ * Explicit deletion errors reject with an `AggregateError` instead; failed IDs
+ * remain tracked in the ledger for a later retry.
+ */
+export interface IExampleCleanupResult {
+  /**
+   * IDs deleted successfully, including already-absent (404) examples.
+   */
+  deleted: string[];
+}
+
+/**
+ * Options for `MockSDK.clearExamples()`.
+ * Explicit deletion errors reject with an `AggregateError` whose entries name
+ * the example that failed.
+ */
+export interface IClearExamplesOptions {
+  /**
+   * Maximum number of DELETE requests in flight per batch. Default 8.
+   * Deletions run in fixed-size batches, so a slow request delays the next
+   * batch instead of being replaced by a fresh one.
+   */
+  concurrency?: number;
+
+  /**
+   * Per-delete timeout in milliseconds or as a duration string (e.g. '30s').
+   * Default 30000 ms.
+   */
+  timeout?: TDuration;
+}
+
+/**
  * A single request recorded by the mock server.
  */
 export interface IRequestHistoryItem {
@@ -100,7 +165,7 @@ export interface IGetRequestHistoryOptions {
   method?: TMethod;
 
   /**
-   * Maximum number of records to return (default 100).
+   * Maximum number of records to return (server default 1000).
    */
   limit?: number;
 
@@ -363,6 +428,13 @@ export type TWebSocketFactory = (url: string) => WebSocketLike;
 /** Optional construction options for MockSDK. */
 export interface IMockSDKOptions {
   wsFactory?: TWebSocketFactory;
+
+  /**
+   * When true (default), example IDs created through this instance are tracked
+   * in `exampleIds` for later bulk cleanup. The ledger grows until IDs are
+   * deleted or cleared; disable tracking for long-lived instances.
+   */
+  trackExamples?: boolean;
 }
 
 /** Removes a stream subscription. */

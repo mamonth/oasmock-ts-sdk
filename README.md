@@ -36,6 +36,43 @@ const lastRequest = await mockSDK.getLastRequest({
 })
 ```
 
+### Isolating examples per test (scopes)
+
+Each SDK instance keeps a client-based ledger of the examples it created.
+`createScope()` returns a client that shares the same HTTP transport but has its
+own ledger, providing client-based ledger isolation so concurrent tests can
+clean up only their own examples. Server-side mock state is still shared:
+
+```typescript
+import { MockSDK } from 'oasmock-sdk'
+
+const root = new MockSDK('http://localhost:19191')
+
+async function runScenario() {
+  const scope = root.createScope()
+  try {
+    await scope.onRequest('/ping').respondWith({ body: { message: 'scoped' } })
+    // ... exercise the system under test
+  } finally {
+    // Surface cleanup failures without masking a scenario error.
+    try {
+      await scope.clearExamples()
+    } catch (cleanupError) {
+      console.error('Failed to clear scoped examples', cleanupError)
+    }
+  }
+}
+```
+
+`sdk.exampleIds` is the client-based ledger itself (iterable, with local-only
+`add`/`remove`/`reset`). `clearExamples()` snapshots that ledger, issues bounded,
+timed-out `DELETE` requests (8 in flight and 30s per request by default; override
+with `{ concurrency, timeout }`, where `timeout` accepts milliseconds or a
+duration string like `'10s'`), and removes successfully deleted IDs; already-absent
+examples (404) count as deleted, while failed IDs stay tracked for a later retry.
+Explicit deletion errors reject with an `AggregateError` after the remaining
+attempts settle, and each entry names the example it belongs to.
+
 ### Async (AsyncAPI) management
 
 > **Experimental**: the async management API and the notification stream may change without a

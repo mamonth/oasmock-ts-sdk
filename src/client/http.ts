@@ -1,4 +1,4 @@
-import { MOCK_PATH_SUFFIX } from '../constants';
+import { normalizeBaseUrl } from '../internal/url';
 import {
   createExample,
   deleteExample as deleteExampleCall,
@@ -20,14 +20,6 @@ import type {
 } from './generated/types.gen';
 
 /**
- * Trims trailing slashes from the base URL and appends the mock server path suffix.
- */
-export function normalizeBaseUrl(baseUrl: string): string {
-  const normalized = baseUrl.replace(/\/+$/, '');
-  return `${normalized}${MOCK_PATH_SUFFIX}`;
-}
-
-/**
  * Creates an HTTP client wrapping the generated OASMock control API.
  */
 export function createHttpClient(baseUrl: string) {
@@ -45,9 +37,13 @@ export function createHttpClient(baseUrl: string) {
       });
       return response.data;
     },
-    async deleteExample(exampleId: string) {
-      const response = await deleteExampleCall({ client, path: { exampleId } });
-      return response.data;
+    async deleteExample(exampleId: string, signal?: AbortSignal) {
+      const response = await deleteExampleCall({
+        client,
+        path: { exampleId },
+        ...(signal !== undefined ? { signal } : {}),
+      });
+      return { status: response.response?.status, error: response.error };
     },
     async getRequests(params?: GetRequestsData['query']) {
       const options: Options<GetRequestsData> = { client };

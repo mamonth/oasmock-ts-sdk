@@ -8,16 +8,52 @@ Then returns properly formatted runtime expression string
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HttpClient } from './client/http';
 import { MockSDK } from './mock-sdk';
+import type { IClearExamplesOptions } from './types';
 
-const { mockCreateHttpClient } = vi.hoisted(() => ({
+const { mockCreateHttpClient, mockExampleIdStore } = vi.hoisted(() => ({
   mockCreateHttpClient: vi.fn(),
+  mockExampleIdStore: vi.fn(),
 }));
 
 vi.mock('./client/http', () => ({
   createHttpClient: mockCreateHttpClient,
 }));
 
+vi.mock('./internal/example-id-store', () => ({
+  ExampleIdStore: mockExampleIdStore,
+}));
+
 import { createHttpClient } from './client/http';
+
+type DeleteResult = Awaited<ReturnType<HttpClient['deleteExample']>>;
+
+interface IExampleIdStoreStub {
+  snapshot: string[];
+  size: number;
+  has: ReturnType<typeof vi.fn>;
+  add: ReturnType<typeof vi.fn>;
+  remove: ReturnType<typeof vi.fn>;
+  reset: ReturnType<typeof vi.fn>;
+  [Symbol.iterator](): IterableIterator<string>;
+}
+
+function createExampleIdStoreStub(): IExampleIdStoreStub {
+  const snapshot: string[] = [];
+
+  return {
+    snapshot,
+    size: 0,
+    has: vi.fn(),
+    add: vi.fn(),
+    remove: vi.fn(),
+    reset: vi.fn(),
+    [Symbol.iterator]: () => snapshot[Symbol.iterator](),
+  };
+}
+
+function storeOf(sdk: MockSDK): IExampleIdStoreStub {
+  return sdk.exampleIds as unknown as IExampleIdStoreStub;
+}
 
 describe('MockSDK', () => {
   const mockHttpClient: HttpClient = {
@@ -33,6 +69,8 @@ describe('MockSDK', () => {
   beforeEach(() => {
     mockCreateHttpClient.mockClear();
     mockCreateHttpClient.mockReturnValue(mockHttpClient);
+    mockExampleIdStore.mockReset();
+    mockExampleIdStore.mockImplementation(createExampleIdStoreStub);
     vi.mocked(mockHttpClient.createExample).mockClear();
     vi.mocked(mockHttpClient.deleteExample).mockClear();
     vi.mocked(mockHttpClient.getRequests).mockClear();
@@ -500,11 +538,33 @@ describe('MockSDK', () => {
     */
     it('should send delete request to http client', async () => {
       const sdk = new MockSDK('http://localhost:19191');
-      vi.mocked(mockHttpClient.deleteExample).mockResolvedValue({ success: true });
+      vi.mocked(mockHttpClient.deleteExample).mockResolvedValue({
+        status: 200,
+        error: undefined,
+      });
 
       await sdk.deleteExample('example-1');
 
-      expect(mockHttpClient.deleteExample).toHaveBeenCalledWith('example-1');
+      expect(mockHttpClient.deleteExample).toHaveBeenCalledWith('example-1', undefined);
+    });
+
+    /*
+    Scenario: Treating a 200 response as deletion success
+    Given the server acknowledges deletion with a 200 status
+    When deleteExample resolves
+    Then the call succeeds and the ID is untracked
+    */
+    it('should treat a 200 response as success', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      const store = storeOf(sdk);
+      vi.mocked(mockHttpClient.deleteExample).mockResolvedValue({
+        status: 200,
+        error: undefined,
+      });
+
+      await sdk.deleteExample('example-1');
+
+      expect(store.remove).toHaveBeenCalledWith('example-1');
     });
 
     /*
@@ -515,11 +575,59 @@ describe('MockSDK', () => {
     */
     it('should throw when delete fails', async () => {
       const sdk = new MockSDK('http://localhost:19191');
-      vi.mocked(mockHttpClient.deleteExample).mockResolvedValue({ success: false });
+      const store = storeOf(sdk);
+      const error = { error: 'bad request' };
+      vi.mocked(mockHttpClient.deleteExample).mockResolvedValue({
+        status: 400,
+        error,
+      });
 
-      await expect(sdk.deleteExample('example-1')).rejects.toThrow(
-        'Failed to delete example: example-1'
-      );
+      await expect(sdk.deleteExample('example-1')).rejects.toMatchObject({
+        message: 'Failed to delete example: example-1 (status 400)',
+        cause: error,
+      });
+      expect(store.remove).not.toHaveBeenCalled();
+    });
+
+    /*
+    Scenario: Deleting an example with no HTTP response
+    Given a transport error without a status
+    When deleteExample is called
+    Then it rejects with an unknown status and carries the transport error
+    */
+    it('should throw when no status is available', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      const store = storeOf(sdk);
+      const error = new Error('offline');
+      vi.mocked(mockHttpClient.deleteExample).mockResolvedValue({
+        status: undefined,
+        error,
+      });
+
+      await expect(sdk.deleteExample('example-1')).rejects.toMatchObject({
+        message: 'Failed to delete example: example-1 (status unknown)',
+        cause: error,
+      });
+      expect(store.remove).not.toHaveBeenCalled();
+    });
+
+    /*
+    Scenario: Deleting an example when the transport rejects
+    Given a rejected DELETE request
+    When deleteExample is called
+    Then it rejects with an ID-bearing error and keeps the ID tracked
+    */
+    it('should wrap a transport rejection with the example ID', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      const store = storeOf(sdk);
+      const error = new Error('offline');
+      vi.mocked(mockHttpClient.deleteExample).mockRejectedValue(error);
+
+      await expect(sdk.deleteExample('example-1')).rejects.toMatchObject({
+        message: 'Failed to delete example: example-1: offline',
+        cause: error,
+      });
+      expect(store.remove).not.toHaveBeenCalled();
     });
 
     /*
@@ -530,12 +638,482 @@ describe('MockSDK', () => {
     */
     it('should throw when exampleId is empty', async () => {
       const sdk = new MockSDK('http://localhost:19191');
+      const store = storeOf(sdk);
 
       await expect(sdk.deleteExample('')).rejects.toThrow('Example ID is required');
       expect(mockHttpClient.deleteExample).not.toHaveBeenCalled();
+      expect(store.remove).not.toHaveBeenCalled();
+    });
+
+    /*
+    Scenario: Treating an already-absent example as deleted
+    Given a tracked example the server no longer knows
+    When deleteExample returns 404
+    Then the call resolves and the ID is untracked
+    */
+    it('should treat 404 as already deleted and untrack the ID', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      const store = storeOf(sdk);
+      vi.mocked(mockHttpClient.deleteExample).mockResolvedValue({
+        status: 404,
+        error: { error: 'not found' },
+      });
+
+      await sdk.deleteExample('gone');
+
+      expect(store.remove).toHaveBeenCalledWith('gone');
     });
   });
 
+  describe('exampleIds', () => {
+    /*
+    Scenario: Tracking IDs created through setExample
+    Given a successful example creation
+    When setExample resolves
+    Then the returned ID is added to the ledger
+    */
+    it('should track created example IDs', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      const store = storeOf(sdk);
+      vi.mocked(mockHttpClient.createExample).mockResolvedValue({
+        success: true,
+        id: 'example-1',
+      });
+
+      await sdk.setExample({ path: '/test' }, { code: 200 });
+
+      expect(store.add).toHaveBeenCalledWith('example-1');
+    });
+
+    /*
+    Scenario: Tracking IDs created through addAsyncExample
+    Given a successful async example creation
+    When addAsyncExample resolves
+    Then the returned ID is added to the ledger
+    */
+    it('should track async example IDs', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      const store = storeOf(sdk);
+      vi.mocked(mockHttpClient.createExample).mockResolvedValue({
+        success: true,
+        id: 'async-1',
+      });
+
+      await sdk.addAsyncExample({ channel: '/ch', payload: { ok: true } });
+
+      expect(store.add).toHaveBeenCalledWith('async-1');
+    });
+
+    /*
+    Scenario: Disabling automatic tracking
+    Given an SDK constructed with trackExamples false
+    When an example is created
+    Then the ledger is not touched
+    */
+    it('should not track when trackExamples is false', async () => {
+      const sdk = new MockSDK('http://localhost:19191', { trackExamples: false });
+      const store = storeOf(sdk);
+      vi.mocked(mockHttpClient.createExample).mockResolvedValue({
+        success: true,
+        id: 'example-1',
+      });
+
+      await sdk.setExample({ path: '/test' }, { code: 200 });
+
+      expect(store.add).not.toHaveBeenCalled();
+    });
+
+    /*
+    Scenario: Disabling tracking for async examples
+    Given an SDK constructed with trackExamples false
+    When an async example is created
+    Then the ledger is not touched
+    */
+    it('should not track async examples when disabled', async () => {
+      const sdk = new MockSDK('http://localhost:19191', { trackExamples: false });
+      const store = storeOf(sdk);
+      vi.mocked(mockHttpClient.createExample).mockResolvedValue({
+        success: true,
+        id: 'async-1',
+      });
+
+      await sdk.addAsyncExample({ channel: '/ch', payload: { ok: true } });
+
+      expect(store.add).not.toHaveBeenCalled();
+    });
+
+    /*
+    Scenario: Not tracking a failed creation
+    Given a failing example creation
+    When setExample rejects
+    Then no ID is added to the ledger
+    */
+    it('should not track failed creations', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      const store = storeOf(sdk);
+      vi.mocked(mockHttpClient.createExample).mockResolvedValue({
+        success: false,
+        message: 'fail',
+      });
+
+      await expect(sdk.setExample({ path: '/test' }, { code: 200 })).rejects.toThrow();
+      expect(store.add).not.toHaveBeenCalled();
+    });
+
+    /*
+    Scenario: Exposing the client-based ledger
+    Given an SDK instance
+    When exampleIds is accessed
+    Then it returns the ledger created for this instance
+    */
+    it('should expose the ledger instance', () => {
+      const sdk = new MockSDK('http://localhost:19191');
+
+      expect(sdk.exampleIds).toBe(storeOf(sdk));
+      expect(mockExampleIdStore).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('createScope', () => {
+    /*
+    Scenario: Sharing the transport while isolating ledgers
+    Given a parent SDK
+    When a scope is created
+    Then the HTTP client is created once and each client has its own ledger
+    */
+    it('should share the transport and isolate ledgers', () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      const scope = sdk.createScope();
+
+      expect(createHttpClient).toHaveBeenCalledTimes(1);
+      expect(mockExampleIdStore).toHaveBeenCalledTimes(2);
+      expect(scope.exampleIds).not.toBe(sdk.exampleIds);
+    });
+
+    /*
+    Scenario: Inheriting and overriding trackExamples
+    Given a parent with tracking disabled
+    When a scope overrides tracking on
+    Then only the scope tracks created IDs
+    */
+    it('should inherit and override trackExamples', async () => {
+      const sdk = new MockSDK('http://localhost:19191', { trackExamples: false });
+      const trackedScope = sdk.createScope({ trackExamples: true });
+      const rootStore = storeOf(sdk);
+      const scopeStore = storeOf(trackedScope);
+      vi.mocked(mockHttpClient.createExample).mockResolvedValue({
+        success: true,
+        id: 'example-1',
+      });
+
+      await sdk.setExample({ path: '/test' }, { code: 200 });
+      await trackedScope.setExample({ path: '/test' }, { code: 200 });
+
+      expect(rootStore.add).not.toHaveBeenCalled();
+      expect(scopeStore.add).toHaveBeenCalledWith('example-1');
+    });
+
+    /*
+    Scenario: Inheriting the WebSocket factory
+    Given a parent SDK with a custom wsFactory
+    When the scope subscribes to the management stream
+    Then the scope uses the inherited factory
+    */
+    it('should inherit the WebSocket factory', () => {
+      const wsFactory = vi.fn().mockReturnValue({
+        addEventListener: vi.fn(),
+        close: vi.fn(),
+      });
+      const sdk = new MockSDK('https://example.com', { wsFactory });
+
+      const off = sdk.createScope().on('push', () => {});
+
+      expect(wsFactory).toHaveBeenCalledWith('wss://example.com/_mock/stream');
+      off();
+    });
+
+    /*
+    Scenario: Using the consumer facade on a scope
+    Given a created scope
+    When asyncConsumers.getList is called
+    Then the shared transport is used
+    */
+    it('should expose the asyncConsumers facade on scopes', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      const scope = sdk.createScope();
+      vi.mocked(mockHttpClient.listConsumers).mockResolvedValue({ consumers: [] });
+
+      await scope.asyncConsumers.getList();
+
+      expect(mockHttpClient.listConsumers).toHaveBeenCalled();
+    });
+
+    /*
+    Scenario: Creating a base scope from a subclass
+    Given a MockSDK subclass with extra behavior
+    When createScope is called
+    Then the scope is a base MockSDK over the shared context
+    */
+    it('should create a base scope from a subclass', () => {
+      class CustomMockSDK extends MockSDK {
+        custom(): string {
+          return 'custom';
+        }
+      }
+
+      const scope = new CustomMockSDK('http://localhost:19191').createScope();
+
+      expect(scope).toBeInstanceOf(MockSDK);
+      expect(scope).not.toBeInstanceOf(CustomMockSDK);
+      expect(createHttpClient).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('clearExamples', () => {
+    /*
+    Scenario: Clearing every tracked example
+    Given two tracked IDs
+    When clearExamples runs
+    Then both are deleted and the ledger is emptied
+    */
+    it('should delete all tracked examples and clear the ledger', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      const store = storeOf(sdk);
+      store.snapshot.push('a', 'b');
+      vi.mocked(mockHttpClient.deleteExample).mockResolvedValue({
+        status: 200,
+        error: undefined,
+      });
+
+      const result = await sdk.clearExamples();
+
+      expect(mockHttpClient.deleteExample).toHaveBeenCalledTimes(2);
+      expect(mockHttpClient.deleteExample).toHaveBeenCalledWith('a', expect.any(AbortSignal));
+      expect(mockHttpClient.deleteExample).toHaveBeenCalledWith('b', expect.any(AbortSignal));
+      expect(result).toEqual({ deleted: ['a', 'b'] });
+      expect(store.remove).toHaveBeenCalledWith('a');
+      expect(store.remove).toHaveBeenCalledWith('b');
+    });
+
+    /*
+    Scenario: Keeping failed IDs tracked
+    Given one tracked ID whose delete rejects
+    When clearExamples runs
+    Then it rejects with an ID-bearing error and the ID stays in the ledger
+    */
+    it('should reject on failure and keep the failed ID tracked', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      const store = storeOf(sdk);
+      store.snapshot.push('bad');
+      const error = new Error('network');
+      vi.mocked(mockHttpClient.deleteExample).mockRejectedValue(error);
+
+      const reason = await sdk.clearExamples().catch((item: unknown) => item);
+      const [failure] = (reason as AggregateError).errors;
+
+      expect(reason).toBeInstanceOf(AggregateError);
+      expect(failure).toMatchObject({
+        message: 'Failed to delete example: bad: network',
+        cause: error,
+      });
+      expect(store.remove).not.toHaveBeenCalled();
+    });
+
+    /*
+    Scenario: Retrying a previously failed ID
+    Given a cleanup that failed once
+    When clearExamples runs again after the server recovers
+    Then the still-tracked ID is deleted and the ledger is emptied
+    */
+    it('should retry an ID that failed a previous cleanup', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      const store = storeOf(sdk);
+      store.snapshot.push('flaky');
+      vi.mocked(mockHttpClient.deleteExample).mockRejectedValueOnce(new Error('network'));
+
+      await expect(sdk.clearExamples()).rejects.toBeInstanceOf(AggregateError);
+      expect(store.remove).not.toHaveBeenCalled();
+
+      vi.mocked(mockHttpClient.deleteExample).mockResolvedValue({
+        status: 200,
+        error: undefined,
+      });
+      const result = await sdk.clearExamples();
+
+      expect(result).toEqual({ deleted: ['flaky'] });
+      expect(store.remove).toHaveBeenCalledWith('flaky');
+    });
+
+    /*
+    Scenario: Clearing an empty ledger
+    Given no tracked IDs
+    When clearExamples runs
+    Then no requests are made and the result is empty
+    */
+    it('should handle an empty ledger', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+
+      const result = await sdk.clearExamples();
+
+      expect(mockHttpClient.deleteExample).not.toHaveBeenCalled();
+      expect(result).toEqual({ deleted: [] });
+    });
+
+    /*
+    Scenario: Keeping IDs added while cleanup is in flight
+    Given a cleanup awaiting a successful delete
+    When a new ID is added before the delete settles
+    Then the delete succeeds and the new ID is not part of the snapshot
+    */
+    it('should keep IDs added during cleanup', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      const store = storeOf(sdk);
+      store.snapshot.push('a');
+
+      let resolveDelete = () => {};
+      vi.mocked(mockHttpClient.deleteExample).mockImplementation(
+        () =>
+          new Promise<DeleteResult>((resolve) => {
+            resolveDelete = () => resolve({ status: 200, error: undefined });
+          })
+      );
+
+      const cleanup = sdk.clearExamples();
+      store.snapshot.push('late');
+      resolveDelete();
+      const result = await cleanup;
+
+      expect(result).toEqual({ deleted: ['a'] });
+      expect(store.remove).toHaveBeenCalledWith('a');
+      expect(store.remove).not.toHaveBeenCalledWith('late');
+    });
+
+    /*
+    Scenario: Respecting the concurrency limit
+    Given three tracked IDs and a concurrency of two
+    When clearExamples runs
+    Then only two deletes are in flight before the next batch starts
+    */
+    it('should respect the concurrency limit', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      storeOf(sdk).snapshot.push('a', 'b', 'c');
+      const resolvers: Array<() => void> = [];
+      vi.mocked(mockHttpClient.deleteExample).mockImplementation(
+        () =>
+          new Promise<DeleteResult>((resolve) => {
+            resolvers.push(() => resolve({ status: 200, error: undefined }));
+          })
+      );
+
+      const cleanup = sdk.clearExamples({ concurrency: 2 });
+      expect(mockHttpClient.deleteExample).toHaveBeenCalledTimes(2);
+
+      resolvers[0]?.();
+      resolvers[1]?.();
+      await vi.waitFor(() => expect(mockHttpClient.deleteExample).toHaveBeenCalledTimes(3));
+
+      resolvers[2]?.();
+      const result = await cleanup;
+
+      expect(result).toEqual({ deleted: ['a', 'b', 'c'] });
+    });
+
+    /*
+    Scenario: Timing out a hung delete
+    Given a delete that never resolves
+    When clearExamples runs with a short numeric or duration-string timeout
+    Then the delete is aborted, cleanup rejects, and the ID stays tracked
+    */
+    it.each([10, '10ms'] as const)('should time out a hung delete with %s', async (timeout) => {
+      const sdk = new MockSDK('http://localhost:19191');
+      const store = storeOf(sdk);
+      store.snapshot.push('hung');
+      vi.mocked(mockHttpClient.deleteExample).mockImplementation(
+        (_id, signal) =>
+          new Promise<DeleteResult>((_resolve, reject) => {
+            signal?.addEventListener('abort', () => reject(new Error('aborted')));
+          })
+      );
+
+      const reason = await sdk.clearExamples({ timeout }).catch((item: unknown) => item);
+
+      expect(reason).toBeInstanceOf(AggregateError);
+      expect(((reason as AggregateError).errors[0] as Error).message).toBe(
+        'Failed to delete example: hung (timed out after 10ms)'
+      );
+      expect(store.remove).not.toHaveBeenCalled();
+    });
+
+    /*
+    Scenario: Keeping only failed IDs after mixed cleanup outcomes
+    Given one deletable and one failing example
+    When clearExamples runs
+    Then it rejects, removes the deleted ID, and keeps the failed one
+    */
+    it('should reject mixed cleanup outcomes after all attempts', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      const store = storeOf(sdk);
+      store.snapshot.push('ok', 'bad');
+      vi.mocked(mockHttpClient.deleteExample).mockImplementation((id) =>
+        id === 'bad'
+          ? Promise.reject(new Error('boom'))
+          : Promise.resolve({ status: 200, error: undefined })
+      );
+
+      const reason = await sdk.clearExamples({ concurrency: 1 }).catch((item: unknown) => item);
+
+      expect(reason).toBeInstanceOf(AggregateError);
+      expect(((reason as AggregateError).errors[0] as Error).message).toBe(
+        'Failed to delete example: bad: boom'
+      );
+      expect(mockHttpClient.deleteExample).toHaveBeenCalledTimes(2);
+      expect(store.remove).toHaveBeenCalledWith('ok');
+      expect(store.remove).not.toHaveBeenCalledWith('bad');
+    });
+
+    /*
+    Scenario: Normalizing a non-Error rejection reason
+    Given a delete that rejects with a plain string
+    When clearExamples runs
+    Then the AggregateError carries an ID-bearing Error and the ID stays tracked
+    */
+    it('should normalize non-Error rejections', async () => {
+      const sdk = new MockSDK('http://localhost:19191');
+      const store = storeOf(sdk);
+      store.snapshot.push('bad');
+      vi.mocked(mockHttpClient.deleteExample).mockRejectedValue('network down');
+
+      const reason = await sdk.clearExamples().catch((item: unknown) => item);
+      const [failure] = (reason as AggregateError).errors;
+
+      expect(failure).toBeInstanceOf(Error);
+      expect((failure as Error).message).toBe('Failed to delete example: bad: network down');
+      expect((failure as Error).cause).toBe('network down');
+      expect(store.remove).not.toHaveBeenCalled();
+    });
+
+    /*
+    Scenario: Rejecting invalid cleanup options
+    Given a non-positive or malformed concurrency or timeout
+    When clearExamples runs
+    Then it rejects without issuing any delete and keeps the ledger intact
+    */
+    it.each<[string, IClearExamplesOptions, string]>([
+      ['zero concurrency', { concurrency: 0 }, 'concurrency must be a positive integer'],
+      ['fractional concurrency', { concurrency: 1.5 }, 'concurrency must be a positive integer'],
+      ['zero timeout', { timeout: 0 }, 'timeout must be a positive integer'],
+      ['zero duration', { timeout: '0ms' }, 'timeout must be a positive integer'],
+      ['malformed duration', { timeout: 'soon' }, 'Invalid duration: soon'],
+    ])('should reject %s', async (_name, options, message) => {
+      const sdk = new MockSDK('http://localhost:19191');
+      const store = storeOf(sdk);
+      store.snapshot.push('kept');
+
+      await expect(sdk.clearExamples(options)).rejects.toThrow(message);
+      expect(mockHttpClient.deleteExample).not.toHaveBeenCalled();
+      expect(store.remove).not.toHaveBeenCalled();
+    });
+  });
   describe('fireEvent', () => {
     /*
     Scenario: Firing global event by default

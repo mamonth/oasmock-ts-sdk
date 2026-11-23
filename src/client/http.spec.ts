@@ -1,13 +1,12 @@
 /*
-Scenario: Normalizing base URL for OASMock server
-Given a base URL with or without trailing slash
-When normalizeBaseUrl is called
-Then returns URL with /_mock suffix and no duplicate slashes
-
+Scenario: HTTP client wraps the generated OASMock control API
+Given the generated SDK and client factories
+When the HTTP client methods are called
+Then the corresponding generated calls are made with the expected arguments
 */
 
 import { describe, expect, it, vi } from 'vitest';
-import { createHttpClient, normalizeBaseUrl } from './http';
+import { createHttpClient } from './http';
 
 const {
   mockCreateExample,
@@ -53,48 +52,6 @@ describe('HTTP Client', () => {
     vi.clearAllMocks();
     mockCreateConfig.mockReturnValue({ baseUrl: 'http://localhost:19191/_mock' });
     mockCreateClient.mockReturnValue(mockClientInstance);
-  });
-
-  describe('normalizeBaseUrl', () => {
-    /*
-    Scenario: Normalizing URL without trailing slash
-    Given base URL http://localhost:19191
-    When normalizeBaseUrl is called
-    Then returns http://localhost:19191/_mock
-    */
-    it('should add suffix to URL without trailing slash', () => {
-      expect(normalizeBaseUrl('http://localhost:19191')).toBe('http://localhost:19191/_mock');
-    });
-
-    /*
-    Scenario: Normalizing URL with trailing slash
-    Given base URL http://localhost:19191/
-    When normalizeBaseUrl is called
-    Then returns http://localhost:19191/_mock (removes extra slash)
-    */
-    it('should handle URL with trailing slash', () => {
-      expect(normalizeBaseUrl('http://localhost:19191/')).toBe('http://localhost:19191/_mock');
-    });
-
-    /*
-    Scenario: Normalizing URL with multiple trailing slashes
-    Given base URL http://localhost:19191//
-    When normalizeBaseUrl is called
-    Then returns http://localhost:19191/_mock (removes all extra slashes)
-    */
-    it('should handle URL with multiple trailing slashes', () => {
-      expect(normalizeBaseUrl('http://localhost:19191//')).toBe('http://localhost:19191/_mock');
-    });
-
-    /*
-    Scenario: Normalizing URL with path segments
-    Given base URL http://example.com/api
-    When normalizeBaseUrl is called
-    Then returns http://example.com/api/_mock
-    */
-    it('should preserve path segments before adding suffix', () => {
-      expect(normalizeBaseUrl('http://example.com/api')).toBe('http://example.com/api/_mock');
-    });
   });
 
   describe('createHttpClient', () => {
@@ -178,7 +135,11 @@ describe('HTTP Client', () => {
     Then calls generated deleteExample with client and path
     */
     it('should delete an example', async () => {
-      const mockResponse = { data: { success: true } };
+      const mockResponse = {
+        data: { success: true },
+        error: undefined,
+        response: { status: 200 },
+      };
       mockDeleteExample.mockResolvedValue(mockResponse);
       const client = createHttpClient('http://localhost:19191');
 
@@ -188,7 +149,51 @@ describe('HTTP Client', () => {
         client: mockClientInstance,
         path: { exampleId: 'example-1' },
       });
-      expect(result).toEqual(mockResponse.data);
+      expect(result).toEqual({ status: 200, error: undefined });
+    });
+
+    /*
+    Scenario: HTTP client deleteExample exposes a 404 status
+    Given the generated client returns a missing example error
+    When deleteExample is called
+    Then the status is preserved for idempotent cleanup
+    */
+    it('should expose the delete status and error', async () => {
+      mockDeleteExample.mockResolvedValue({
+        data: undefined,
+        error: { error: 'not found' },
+        request: {},
+        response: { status: 404 },
+      });
+      const client = createHttpClient('http://localhost:19191');
+
+      const result = await client.deleteExample('missing');
+
+      expect(result).toEqual({ status: 404, error: { error: 'not found' } });
+    });
+
+    /*
+    Scenario: HTTP client deleteExample forwards an AbortSignal
+    Given an AbortSignal
+    When deleteExample is called
+    Then the signal is passed to the generated client
+    */
+    it('should forward an AbortSignal', async () => {
+      const controller = new AbortController();
+      mockDeleteExample.mockResolvedValue({
+        data: { success: true },
+        error: undefined,
+        response: { status: 200 },
+      });
+      const client = createHttpClient('http://localhost:19191');
+
+      await client.deleteExample('example-1', controller.signal);
+
+      expect(mockDeleteExample).toHaveBeenCalledWith({
+        client: mockClientInstance,
+        path: { exampleId: 'example-1' },
+        signal: controller.signal,
+      });
     });
 
     /*
