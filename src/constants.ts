@@ -70,6 +70,14 @@ export const DEFAULT_TIMEOUTS = {
 } as const;
 
 /**
+ * Defaults for `MockSDK.clearExamples()`.
+ */
+export const EXAMPLE_CLEANUP_DEFAULTS = {
+  CONCURRENCY: 8,
+  TIMEOUT_MS: 30000,
+} as const;
+
+/**
  * Shared values used by integration tests and test helpers.
  */
 export const TEST_CONSTANTS = {

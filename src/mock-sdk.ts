@@ -1,6 +1,6 @@
 import type { RequestHistoryItem as GeneratedRequestHistoryItem } from './client/generated/types.gen';
 import type { HttpClient } from './client/http';
-import { createHttpClient, normalizeBaseUrl } from './client/http';
+import { createHttpClient } from './client/http';
 import {
   CONDITION_KEY_PREFIXES,
   type ConditionType,
@@ -10,21 +10,32 @@ import {
 } from './constants';
 import { parseDurationToMs } from './internal/duration';
 import {
+  cleanupExamples,
+  deletionError,
+  errorMessage,
+  resolveCleanupPlan,
+} from './internal/example-cleanup';
+import { ExampleIdStore } from './internal/example-id-store';
+import {
   type IAsyncExampleRequestParams,
   mapAsyncExampleToRequest,
   mapConditionsToAddExampleRequest,
   mapHistoryOptionsToGetRequestsData,
 } from './internal/mappers';
+import { normalizeBaseUrl } from './internal/url';
 import { MockSDKAsyncChannel } from './mock-sdk-async-channel';
 import { MockSDKConsumer } from './mock-sdk-consumer';
 import { MockSDKRequest } from './mock-sdk-request';
 import { ManagementStream } from './mock-sdk-stream';
 import type {
   IAsyncChannel,
+  IClearExamplesOptions,
   IConsumer,
   IConsumerEnvelope,
   IDisconnectOptions,
   IEventEnvelope,
+  IExampleCleanupResult,
+  IExampleIds,
   IFireEventOptions,
   IGetRequestHistoryOptions,
   IMockSDKOptions,
@@ -45,6 +56,50 @@ import type {
 const PREFIXED_CONDITION_KEY = new Set<string>(PREFIXED_CONDITION_TYPES);
 
 /**
+ * Shared transport and defaults used by an SDK instance and its scopes.
+ */
+interface IMockSDKContext {
+  readonly baseUrl: string;
+  readonly client: HttpClient;
+  readonly wsFactory: TWebSocketFactory;
+  readonly trackExamples: boolean;
+}
+
+/**
+ * Construction channel for scopes: carries a prebuilt context through the public
+ * options object without exposing it on `IMockSDKOptions`.
+ */
+const INTERNAL_CONTEXT = Symbol('oasmock.internalContext');
+
+type TContextOptions = IMockSDKOptions & { [INTERNAL_CONTEXT]: IMockSDKContext };
+
+/**
+ * Builds a fresh context for a root client.
+ */
+function buildContext(baseUrl: string, options?: IMockSDKOptions): IMockSDKContext {
+  return {
+    baseUrl,
+    client: createHttpClient(baseUrl),
+    wsFactory: options?.wsFactory ?? defaultWsFactory,
+    trackExamples: options?.trackExamples !== false,
+  };
+}
+
+/**
+ * Narrows options to the internal context carrier when a scope supplies one.
+ */
+function hasInternalContext(options: IMockSDKOptions | undefined): options is TContextOptions {
+  return options !== undefined && INTERNAL_CONTEXT in options;
+}
+
+/**
+ * Attaches a shared context to the options passed to a scope constructor.
+ */
+function withInternalContext(context: IMockSDKContext): TContextOptions {
+  return { [INTERNAL_CONTEXT]: context };
+}
+
+/**
  * Throws if the given TTL is defined but is not a non-negative integer.
  */
 function assertValidTtl(ttl: number | undefined): void {
@@ -58,6 +113,13 @@ function assertValidTtl(ttl: number | undefined): void {
  */
 function buildStreamUrl(baseUrl: string): string {
   return `${normalizeBaseUrl(baseUrl).replace(/^http/, 'ws')}/stream`;
+}
+
+/**
+ * Treats 2xx and already-absent (404) examples as successfully deleted.
+ */
+function isDeleteSuccess(status: number | undefined): boolean {
+  return status === 404 || (status !== undefined && status >= 200 && status < 300);
 }
 
 /**
@@ -76,18 +138,70 @@ function defaultWsFactory(url: string): WebSocketLike {
  * (AsyncAPI) targets, and subscribe to the management stream.
  */
 export class MockSDK {
-  private readonly client: HttpClient;
-  private readonly baseUrl: string;
-  private readonly wsFactory: TWebSocketFactory;
+  private readonly context: IMockSDKContext;
+  private readonly examples: ExampleIdStore;
   private stream?: ManagementStream;
 
   /**
    * Creates a client bound to the OASMock server at `baseUrl`.
    */
   constructor(baseUrl: string, options?: IMockSDKOptions) {
-    this.client = createHttpClient(baseUrl);
-    this.baseUrl = baseUrl;
-    this.wsFactory = options?.wsFactory ?? defaultWsFactory;
+    this.context = hasInternalContext(options)
+      ? options[INTERNAL_CONTEXT]
+      : buildContext(baseUrl, options);
+    this.examples = new ExampleIdStore();
+  }
+
+  private get client(): HttpClient {
+    return this.context.client;
+  }
+
+  private get baseUrl(): string {
+    return this.context.baseUrl;
+  }
+
+  private get wsFactory(): TWebSocketFactory {
+    return this.context.wsFactory;
+  }
+
+  private get trackExamples(): boolean {
+    return this.context.trackExamples;
+  }
+
+  /**
+   * Client-based ledger of example IDs created through this instance or scope.
+   * Mutations are local only and never issue network requests.
+   */
+  get exampleIds(): IExampleIds {
+    return this.examples;
+  }
+
+  /**
+   * Creates a client-based ledger isolation scope sharing this instance's
+   * context. The scope has its own example ledger, so `clearExamples()` on it
+   * never affects examples created through this instance or sibling scopes.
+   * Server-side mock state is still shared.
+   *
+   * Always returns a base `MockSDK` (not `this`): a subclass that must return a
+   * scope of its own type overrides `createScopeInstance()`.
+   */
+  createScope(options?: IMockSDKOptions): MockSDK {
+    return this.createScopeInstance(options);
+  }
+
+  /**
+   * Builds the scope as a base `MockSDK` over this instance's shared context.
+   * Override this hook when a subclass must return a scope of its own type.
+   */
+  protected createScopeInstance(options?: IMockSDKOptions): MockSDK {
+    const context: IMockSDKContext = {
+      baseUrl: this.baseUrl,
+      client: this.client,
+      wsFactory: options?.wsFactory ?? this.wsFactory,
+      trackExamples: options?.trackExamples ?? this.trackExamples,
+    };
+
+    return new MockSDK(context.baseUrl, withInternalContext(context));
   }
 
   /**
@@ -134,15 +248,64 @@ export class MockSDK {
   }
 
   /**
-   * Removes a dynamic example, cancelling any recurring delivery.
+   * Removes a dynamic example, cancelling any recurring delivery, and untracks
+   * the ID on success or 404.
    */
   async deleteExample(exampleId: string): Promise<void> {
+    await this.deleteRemoteExample(exampleId);
+    this.examples.remove(exampleId);
+  }
+
+  /**
+   * Deletes every example snapshotted from this client's ledger in bounded
+   * concurrent batches. A 404 counts as success. Successfully deleted IDs leave
+   * the ledger; failed IDs stay tracked for a later retry, as do IDs added while
+   * cleanup is in flight. If any explicit deletion error occurs (neither 2xx nor
+   * 404), the returned promise rejects with an AggregateError after the remaining
+   * attempts settle; every entry names the example it belongs to.
+   */
+  async clearExamples(options: IClearExamplesOptions = {}): Promise<IExampleCleanupResult> {
+    const plan = resolveCleanupPlan(options);
+    const snapshot = [...this.examples];
+    const outcome = await cleanupExamples(
+      snapshot,
+      (id, signal) => this.deleteRemoteExample(id, signal),
+      plan
+    );
+
+    for (const id of outcome.deleted) {
+      this.examples.remove(id);
+    }
+
+    if (outcome.failures.length > 0) {
+      throw new AggregateError(
+        outcome.failures.map((failure) => failure.error),
+        `Failed to delete ${outcome.failures.length} example(s)`
+      );
+    }
+
+    return { deleted: outcome.deleted };
+  }
+
+  /**
+   * Deletes one example on the server. Success is decided by the HTTP status
+   * alone: 2xx and 404 count, everything else throws. Every thrown error names
+   * the example so bulk cleanup can attribute failures.
+   */
+  private async deleteRemoteExample(exampleId: string, signal?: AbortSignal): Promise<void> {
     if (!exampleId) {
       throw new Error('Example ID is required');
     }
-    const response = await this.client.deleteExample(exampleId);
-    if (!response?.success) {
-      throw new Error(`Failed to delete example: ${exampleId}`);
+
+    let response: Awaited<ReturnType<HttpClient['deleteExample']>>;
+    try {
+      response = await this.client.deleteExample(exampleId, signal);
+    } catch (cause) {
+      throw deletionError(exampleId, `: ${errorMessage(cause)}`, cause);
+    }
+
+    if (!isDeleteSuccess(response.status)) {
+      throw deletionError(exampleId, ` (status ${response.status ?? 'unknown'})`, response.error);
     }
   }
 
@@ -269,6 +432,10 @@ export class MockSDK {
 
     if (!response.id) {
       throw new Error('Example created but no ID returned');
+    }
+
+    if (this.trackExamples) {
+      this.examples.add(response.id);
     }
 
     return response.id;

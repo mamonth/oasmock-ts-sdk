@@ -18,15 +18,61 @@ constructor(baseUrl: string, options?: IMockSDKOptions)
 
 Creates a new SDK instance pointing to the mock server at `baseUrl`. The SDK automatically appends `/_mock` to the provided URL.
 
-`IMockSDKOptions` has a single optional field:
+`IMockSDKOptions` has two optional fields:
 
 - `wsFactory?: (url: string) => WebSocketLike` – injects a WebSocket factory for the management stream. Defaults to the global `WebSocket` (browser / Node 22+). Needed for environments without a global `WebSocket`.
+- `trackExamples?: boolean` – when `true` (default), IDs of examples created through this instance are tracked in the client-based `exampleIds` ledger for later bulk cleanup. The ledger grows until IDs are deleted or cleared; disable tracking for long-lived instances.
 
 #### Methods
 
 ##### `onRequest(path: string, method?: TMethod): MockSDKRequest`
 
 Returns a `MockSDKRequest` builder for the given path and HTTP method (default `'GET'`).
+
+##### `createScope(options?: IMockSDKOptions): MockSDK`
+
+Creates a client that shares this instance's `baseUrl`, HTTP transport, and (by default) `wsFactory`/`trackExamples`, but has its own example ledger — **client-based ledger isolation**. Server-side mock state is still shared, so scopes isolate cleanup ownership, not request matching. Management streams are per client: a scope that subscribes to `on()` opens its own WebSocket. Use scopes to isolate concurrent test scenarios. The returned scope is always a base `MockSDK`; a subclass that needs a scope of its own type overrides the protected `createScopeInstance()` hook:
+
+```typescript
+const scope = sdk.createScope()
+await scope.onRequest('/ping').respondWith({ body: { ok: true } })
+await scope.clearExamples() // only removes examples created through this scope
+```
+
+##### `exampleIds: IExampleIds`
+
+Client-based ledger of example IDs created through this instance (when `trackExamples` is not `false`). It is iterable and supports local-only mutations that never contact the server:
+
+```typescript
+interface IExampleIds extends Iterable<string> {
+  readonly size: number
+  has(id: string): boolean
+  add(id: string): this      // track an ID, no network
+  remove(id: string): boolean // untrack an ID, no network
+  reset(): void             // forget all IDs, no network
+}
+```
+
+These mutations only change local tracking. `reset()` does not delete server-side
+examples; use `clearExamples()` (or `deleteExample()`) for that.
+
+##### `clearExamples(options?: IClearExamplesOptions): Promise<IExampleCleanupResult>`
+
+Snapshots the client-based ledger and deletes every example in it via bounded batches of `DELETE /_mock/examples/{id}` (oasmock has no bulk-delete endpoint). Each request has a hard timeout: the timeout aborts the request and fails that attempt even if the transport ignores the abort signal. Successfully deleted IDs (including `404`, already absent) are removed from the ledger; failed IDs stay tracked so a later `clearExamples()` can retry them. IDs added while cleanup is in flight are not part of the snapshot and stay tracked. If any explicit deletion error occurs (neither 2xx nor 404), the returned promise rejects with an `AggregateError` after the remaining attempts settle; every error entry names the example it belongs to.
+
+```typescript
+interface IClearExamplesOptions {
+  concurrency?: number  // max in-flight DELETEs per batch, default 8
+  timeout?: TDuration   // per-delete timeout (ms or e.g. '30s'), default 30000
+}
+
+interface IExampleCleanupResult {
+  deleted: string[] // includes already-absent (404) examples
+}
+```
+
+Deletions run in fixed-size batches of `concurrency`; a slow or hung request in
+one batch delays the start of the next (it is not replaced by a queued one).
 
 ##### `asyncChannel(address: string, protocol?: TAsyncProtocol): IAsyncChannel`
 
@@ -47,7 +93,7 @@ Low‑level method to add a mock example. Returns a promise that resolves with t
 
 ##### `deleteExample(exampleId: string): Promise<void>`
 
-Removes a dynamically added example, cancelling any recurring (interval) delivery registered under that ID.
+Removes a dynamically added example, cancelling any recurring (interval) delivery registered under that ID. Success is decided by the HTTP status: `2xx` and `404` (already removed) are treated as success and the ID is untracked from `exampleIds`; any other status rejects. This replaces the earlier body-based `success` check.
 
 ##### `fireEvent(name: string, options?: IFireEventOptions): Promise<void>`
 
